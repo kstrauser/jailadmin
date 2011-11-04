@@ -1,6 +1,6 @@
 #!/usr/bin/perl -w
 
-# $Id: jailadmin 66 2004-04-02 19:44:14Z kirk $
+# $Id: jailadmin 138 2004-11-19 21:04:24Z kirk $
 
 # This software was written by Kirk Strauser <kirk@strauser.com>, and may be
 # freely distributed under the terms of the BSD License.
@@ -26,7 +26,7 @@ my @jails = Jail::getJailList();
 ############################################################
 my %opt =
     (
-     'psstyle' => 'new'
+    'psstyle' => 'new'
     );
 
 
@@ -53,7 +53,7 @@ __EOHELP__
 }
 
 $oper = shift @ARGV;
-@serverlist = Jail::getMatchingJailNames(@ARGV);
+@serverlist = Jail::canonicalizeList(@ARGV);
 
 ############################################################
 #### Main                                               ####
@@ -64,7 +64,7 @@ if ($oper eq 'list')
     print "Configured jails:\n";
     foreach $server (@jails)
     {
-	print "    $server\n";
+        print "    $server\n";
     }
     exit;
 }
@@ -76,38 +76,107 @@ if ($oper eq 'status')
 {
     foreach $server (sort @serverlist)
     {
-	print "Server: $server\n";
+        print "Server: $server\n\n";
 
-	unless (Jail::jailHasProcesses($server))
-	{
-	    print "No running processes.\n\n";
-	    next;
-	}
+        unless (Jail::isRunning($server))
+        {
+            print "That server is not running.\n\n\n";
+            next;
+        }
 
-	my %procinfo = Jail::getProcList($server);
-	if ($opt{'psstyle'} eq 'old')
-	{
-	    print "\nPID    username/uid processname and cmdline\n";
-	    print "------ ------------ ------------------------------\n";
-	    foreach my $pid (sort { $a <=> $b } (keys %procinfo))
-	    {
-		printf "%-6d %-12s %s: %s\n",
-		    ($pid,
-		     "$procinfo{$pid}{'user'} ($procinfo{$pid}{'uid'})",
-		     $procinfo{$pid}{'procname'},
-		     $procinfo{$pid}{'cmdline'})
-		}
-	}
-	elsif ($opt{'psstyle'} eq 'new')
-	{
-	    print "\n";
-	    print `ps -u | head -1`;
-	    foreach my $pid (sort { $a <=> $b } (keys %procinfo))
-	    {
-		print `ps -wup $pid | tail -n 1`;
-	    }
-	}
-	print "\n";
+        # The following code isn't pretty, but it would take a lot of
+        # space to do this stuff elegantly.  Basically, it creates a
+        # table of process data with each column justified
+        # appropriately, either with a fixed format, or with one
+        # relative to the widest entry in that column.  I'm sure that
+        # there are CPAN modules that do the same thing, but an
+        # important design requirement for this project is that it not
+        # rely on any outside dependencies unless absolutely
+        # necessary.
+
+        my %procinfo = Jail::getProcInfo($server);
+        my @pids = keys %procinfo;
+
+        # The key in this hash is the title of the resulting table.
+        # The "keyf" field is the printf formatting string that
+        # affects the contents of the cell.  The "titlef" field is the
+        # printf formatting string that affects the title cell.  The
+        # "order" field controls the sorting order of the fields.  The
+        # "key" field is the key in the %procinfo hash that contains
+        # the cell's value.
+
+        my %coldef =
+            (
+            'USER'    => { 'keyf'   => '%%-%ds',
+                            'order'  => 1 },
+            'PID'     => { 'keyf'   => '%%%ds',
+                            'order'  => 2 },
+            '%CPU'    => { 'keyf'   => '%%5.1f',
+                            'order'  => 3 },
+            '%MEM'    => { 'keyf'   => '%%5.1f',
+                            'order'  => 4 },
+            'RSS'     => { 'keyf'   => '%%%ds',
+                            'order'  => 5 },
+            'TT'      => { 'keyf'   => '%%-%ds',
+                            'order'  => 6 },
+            'STAT'    => { 'keyf'   => '%%-%ds',
+                            'order'  => 7 },
+            'TIME'    => { 'keyf'   => '%%%ds',
+                            'order'  => 8 },
+            'COMMAND' => { 'keyf'   => '%%s',
+                            'order' => 9 }
+            );
+
+        # Get the list of column titles, sorted by the numeric value
+        # in "order".
+        my @columntitles = sort { $coldef{$a}{'order'} <=> $coldef{$b}{'order'} } keys %coldef;
+
+        # Calculate the column key from the column title if needed
+        foreach my $name (@columntitles)
+        {
+            next if defined $coldef{$name}{'key'};
+            my $key = lc $name;
+            $key =~ s/^\W+//;
+            $coldef{$name}{'key'} = $key;
+        }
+
+        # Find the longest value in each column
+        foreach my $name (@columntitles)
+        {
+            my $longest = (sort { $b <=> $a }
+                        length $name,
+                        map { length $procinfo{$_}{$coldef{$name}{'key'}} } @pids)[0];
+
+            # Use that information to build the "keyf" field.
+            $coldef{$name}{'keyf'} = sprintf $coldef{$name}{'keyf'}, $longest;
+
+            # If the "titlef" field is defined, then use the length
+            # information to build it.
+            if (defined $coldef{$name}{'titlef'})
+            {
+                $coldef{$name}{'titlef'} = sprintf $coldef{$name}{'titlef'}, $longest;
+            }
+            # If it's not, then base it off the "keyf" field.
+            else
+            {
+                $coldef{$name}{'titlef'} = $coldef{$name}{'keyf'};
+                # Replace printf strings like "%5.1f" with "%5s".
+                $coldef{$name}{'titlef'} =~ s/(\d+).*$/$1s/;
+            }
+        }
+
+        # Print the table header
+        my $formatstring = join ' ', map { $coldef{$_}{'titlef'} } @columntitles;
+        printf "$formatstring\n", @columntitles;
+
+        # Print the table body
+        $formatstring = join ' ', map { $coldef{$_}{'keyf'} } @columntitles;
+        foreach my $pid (sort @pids)
+        {
+            printf "$formatstring\n", map { $procinfo{$pid}{$coldef{$_}{'key'}} } @ columntitles;
+        }
+
+        print "\n\n";
     }
 }
 
@@ -118,17 +187,17 @@ elsif ($oper eq 'start')
 {
     foreach $server (sort @serverlist)
     {
-	print "Starting server $server...\n";
+        print "Starting server $server...\n";
 
-	# Check for processes already running in that jailspace
-	if (Jail::jailHasProcesses($server))
-	{
-	    print STDERR "ERROR: That jail already seems to be running\n";
-	    next;
-	}
+        # Check for processes already running in that jailspace
+        if (Jail::isRunning($server))
+        {
+            print STDERR "ERROR: That jail already seems to be running\n";
+            next;
+        }
 
-	Jail::mount($server);
-	Jail::launch($server);
+        Jail::mount($server);
+        Jail::launch($server);
     }
 }
 
@@ -144,93 +213,36 @@ elsif ($oper eq 'stop')
 
     foreach my $i (1 .. Jail::maxparallel())
     {
-	my $server = shift @queue;
-	last unless $server;
-	$state{$server} = $initialstate;
+        my $server = shift @queue;
+        last unless $server;
+        $state{$server} = $initialstate;
     }
 
     while (keys %state)
     {
-	my $sleep = 0;
+        my $sleep = 0;
 
-	foreach my $server (sort (keys %state))
-	{
-	    print "--- Server: $server state $state{$server}\n";
+        foreach my $server (sort (keys %state))
+        {
+            print "--- Server: $server state $state{$server}\n";
 
-	    my $finished = 0;
+            my $sleeprequest;
+            ($state{$server}, $sleeprequest) = Jail::stop($server, $state{$server});
+            $sleep = $sleeprequest if $sleeprequest > $sleep;
 
-	    # Send term signal
-	    if ($state{$server} == 1)
-	    {
-		# TERM all of the processes
-		print "Sending signal TERM to all processes in $server\n";
-		Jail::signalProcs($server, 'TERM');
-	    }
+            if (not $state{$server})
+            {
+                # Remove this server from the action list
+                delete $state{$server};
 
-	    # Sleep 5 seconds
-	    elsif ($state{$server} == 2)
-	    {
-		Jail::updateProcessList();
-		print "Waiting at least 5 seconds to check success...\n";
-		$sleep = 5 if $sleep < 5;
-	    }
+                # Add a new server if any are left.
+                my $server = shift @queue;
+                $state{$server} = $initialstate if $server;
+            }
+        }
 
-	    # Sleep 10 seconds for slow processes
-	    elsif ($state{$server} == 3)
-	    {
-		Jail::updateProcessList();
-		if (Jail::jailHasProcesses($server))
-		{
-		    print "Some processes are still running.  Sleeping at least 10 seconds...\n";
-		    $sleep = 10 if $sleep < 10;
-		}
-		else
-		{
-		    print "No processess left.\n";
-		    # Skip the next process check - we've already passed.
-		    $state{$server}++;
-		}
-	    }
-
-	    # Send kill signal
-	    elsif ($state{$server} == 4)
-	    {
-		Jail::updateProcessList();
-		if (Jail::jailHasProcesses($server))
-		{
-		    print "Sending remaining processes the KILL signal\n";
-		    Jail::signalProcs($server, 'KILL');
-		}
-		else
-		{
-		    print "No processess left.\n";
-		}
-	    }
-
-	    # Unmount specified filesystems
-	    elsif ($state{$server} == 5)
-	    {
-		print "Unmounting filesystems for $server\n";
-		Jail::umount($server);
-
-		$finished = 1;
-	    }
-
-	    $state{$server}++;
-
-	    if ($finished)
-	    {
-		# Remove this server from the action list
-		delete $state{$server};
-
-		# Add a new server if any are left.
-		my $server = shift @queue;
-		$state{$server} = $initialstate if $server;
-	    }
-	}
-
-	# Now, sleep for a few seconds if any of the servers need it.
-	sleep $sleep if $sleep;
+        # Now, sleep for a few seconds if any of the servers need it.
+        sleep $sleep if $sleep;
     }
 }
 

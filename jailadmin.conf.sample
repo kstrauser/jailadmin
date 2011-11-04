@@ -1,19 +1,38 @@
-# $Id: jailadmin.conf.sample 66 2004-04-02 19:44:14Z kirk $
+# $Id: jailadmin.conf.sample 138 2004-11-19 21:04:24Z kirk $
+
+#### General notes
+
+# Boolean options can be set to 0 or 1, or any other set of values that Perl
+# recognizes as true and false.
+
+# Options may only refer to or depend on options that have already been
+# defined.  For example, when a server definition begins, all of its options
+# are populated with the defaults that have been defined up to that point in
+# the file.  Also, groups may include references only to groups that were
+# defined before them.  A useful side effect of this arrangement is that you
+# may interleave blocks of default options with blocks of server
+# definitions, so that you can assign one set of defaults to one set of
+# servers, and a totally different set to another.
 
 #### System options
 
-# The directory where all jails live.
+# The default directory where all servers live.  If a server does not define
+# a "dir" setting, then it default to jaildir/<name of server>.
+
 jaildir=/var/jail
 
 # The maximum number of jails to operate on simultaneously.  Currently only
 # used to control how many jails can be simultaneously shut down by
 # jailadmin's "stop" command.
+
 maxparallel=5
 
-# Set whether to or not to display debugging messages.  Disabled by default.
+# Set the debugging level.  A value of '0' disables debugging messages.
+
 debug=1
 
-#### Default options.
+
+#### Default options
 
 ## Any options that begin with "default_" have that prefix removed, and the
 ## corresponding values are assigned to each server that does not otherwise
@@ -22,43 +41,81 @@ debug=1
 
 # The "devfsruleset" option controls which devfs ruleset (heh!) is applied
 # to the /dev mountpoint in a jail.
+
 default_devfsruleset=devfsrules_jail
 
+# The "fstab" option determines which fstab file to use when mounting the
+# filesystems in a jail.  "/etc/fstab" is the default if not specified.
 
-#### Group definitions
+default_fstab=/etc/fstab
 
-## Each entry beginning with "group_" is a comma-delimited list of server
-## name, and may be used (minus the "group_" prefix) with the jailadmin
-## utility for conveniently referring to a set of servers.  Note that
-## "group_all" is a valid definition; it is loaded with the names of every
-## defined server unless otherwise set here.  Setting "group_all" to a
-## subset of defined servers is a quick way to "comment out" decommissioned
-## servers that you're not ready to permanently remove just yet.  Groups may
-## not contain other groups.
+# JailAdmin can shut down a jail using one of two methods: "emulated" or
+# "naive".  "naive" is the old style of shutdown that TERM, then KILL
+# signals to running processes.  "emulated" is similar, but first executes
+# "/etc/rc.shutdown" within the jail for a cleaner shutdown of servers
+# running a normal FreeBSD system.  Note that "emulated" requires that
+# "usejtools" be set to true.
 
-group_all=server1,server2
-group_web=server1,server2,server4
+default_shutdown=naive
 
-#### Server-specific options
+# The command to run when launching the server.  The default is the standard
+# when launching servers running FreeBSD installations.  Another likely
+# alternative is "/sbin/init" for running Linux-based servers.
+
+default_startcommand=/bin/sh /etc/rc
+
+# If your system has the "jls" and "jexec" commands, then set this option to
+# true to use them when appropriate.  Setting this option is almost always
+# desirable.  It removes much of the guesswork from the Jail.pm module and
+# doesn't require that /proc be mounted.
+
+default_usejtools=1
+
+
+#### Server definitions
+
+## Each server must define unique values for "ip" and "hostname"; other
+## values may be inherited from preceding "default_" options.
+
+## If you set a default in the "Default options" block above, but want to
+## explicitly *unset* it in a particular jail, then add a line like "!foo"
+## where foo is the option's name.  If a variable is set or unset multiple
+## times for a server, then the last value (or unsetting) is used.
 
 server1
     ip: 10.0.1.2
     hostname: www.domain1.com
+
     # Appending (number) to the end of a mountpoint causes the system to
     # pause for that many seconds after mounting it.  Useful for adding
     # a slight delay after NFS mounts so that they have time to become
     # live before other filesystems are mounted inside them.
+
     mount: /usr/ports(1),/usr/ports/distfiles,/dev
 
 server2
     ip: 10.0.1.3
     hostname: www.domain2.com
-    mount: /var/spool/news,/usr/ports(1),/usr/ports/distfiles,/dev
+    mount: /usr/ports(1),/usr/ports/distfiles,/dev
 
 server3
     ip: 10.0.1.4
-    hostname: ftp.domain2.com
-
-server4
-    ip: 10.0.1.5
     hostname: www.domain3.com
+    mount: /usr/ports(1),/usr/ports/distfiles,/dev,/compat/linux/proc,/home/freenet/store
+
+#### Group definitions
+
+## Each entry beginning with "group_" is a comma-delimited list of server
+## names (or names of previously-defined groups, or 'ALL' for all servers
+## defined above), and may be used (minus the "group_" prefix) with the
+## jailadmin utility for conveniently referring to a set of servers.
+##
+## Note that "group_all" is a valid definition; it is loaded with the names
+## of every defined server unless otherwise set here.  Setting "group_all"
+## to a "ALL,!retired1,!retired2,!retired3" is a quick way to "comment out"
+## decommissioned servers that you're not ready to permanently remove just
+## yet.
+
+group_all = ALL, ! cruftyoldserver
+group_all = ALL
+group_colo = server2, server3

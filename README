@@ -1,4 +1,4 @@
-# $Id: README 67 2004-04-02 20:41:35Z kirk $
+# $Id: README 138 2004-11-19 21:04:24Z kirk $
 
 #### INTRODUCTION
 
@@ -18,6 +18,10 @@ It consists of four files:
 The optional SNMP components are:
 
   jail-snmp - A plugin to the net-snmp package
+  
+  jail-snmp-persist - A persistent version of jail-snmp that avoids the
+                      startup overhead inherent in launching a new copy every
+                      time the associated OIDs are polled.
 
   JAIL-MIB.txt - A MIB file describing the SNMP attributes
 
@@ -87,28 +91,34 @@ jailadmin.conf, and operation is one of 'start', 'stop', and 'status'.
 jail is not currently running (defined as having one or more processes
 imprisoned within it.
 
-'stop' is not very graceful at this time.  It sends a TERM signal to all
-processes within the jail.  After a 5-second wait, if processes are still
-running, then it waits another 10 seconds.  All processes still running at
-that time are sent the KILL signal.  This is similar to FreeBSD's own
-shutdown process, although vastly less sophisticated.
+'stop' invokes two distinctly different modes of operation.  The first,
+"naive", works as follows:
+
+It sends a TERM signal to all processes within the jail.  After a 5-second
+wait, if processes are still running, then it waits another 10 seconds.
+All processes still running at that time are sent the KILL signal.  This is
+similar to FreeBSD's own shutdown process, although vastly less
+sophisticated.
+
+The second, "emulated", works by first invoking /etc/rc.shutdown within a
+jail.  After that script has completed, it follows the "naive" process
+detailed above to remove all lingering processes.
 
 Recent versions of jailadmin can parallelize stages of the shutdown process
 for several jails at once, so that the waiting periods can be made as
 concurrent as possible.  For example, given 10 jails where each needs to
 wait for the full 15 seconds, the total shutdown time can be reduced from
-150 seconds to 15.  This is very nice for quickly rebooting a numbe of
+150 seconds to 15.  This is very nice for quickly rebooting a number of
 servers.
 
 'status' returns a ps(1)-like status report.  For example:  
 
-PID    username/uid processname and cmdline
------- ------------ ------------------------------
-20307  root (0)     inetd: /usr/sbin/inetd -wW
-20309  root (0)     cron: /usr/sbin/cron
-20311  root (0)     sshd: /usr/sbin/sshd
-20314  root (0)     sendmail: sendmail: Queue runner@00:30:00 for /var/spool/mqueue
-20317  smmsp (25)   sendmail: sendmail: Queue runner@00:30:00 for /var/spool/clientmqueue
+    Server: virtual3
+
+    USER   PID  %CPU  %MEM  RSS TT STAT    TIME COMMAND
+    root 96703   0.0   0.1  908 ?? SsJ  0:00.19 /usr/sbin/syslogd -s
+    root 96760   0.0   0.2 3028 ?? SsJ  0:00.16 /usr/sbin/sshd
+    root 96767   0.0   0.1 1096 ?? IsJ  0:00.05 /usr/sbin/cron -s
 
 
 #### NOTES
@@ -130,6 +140,18 @@ reload this information as needed.  For example, after calling
 Jail::signalProcs(), you would probably want to see if any processes are
 still running in a particular jail.  updateProcessList() will ensure that
 you're examining current data.
+
+Jail.pm can use FreeBSD's "jls" and "jexec" commands to simplify and speed
+up the control of jail environments and data gathering.  Furthermore, they
+remove the requirement of having /proc mounted in the host environment, which
+is certainly appealing to the security-conscious.  There is virtually no ill
+effect from using these tools in a "normal" jail environment that's based on
+a cloned FreeBSD system.  However, extremely minimal jails (such as those
+containing a single server process) or ones based on emulated Linux systems
+(where the "ps" command still looks in /proc for details) may require the
+continued use of the old system.  To enable the use of "jls" and "jexec"
+globally, set "default_usejtools=1" inside jailadmin.conf.  That value may
+be overridden for individual jails.
 
 
 #### SNMP

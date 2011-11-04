@@ -1,10 +1,11 @@
-# $Id: Makefile 67 2004-04-02 20:41:35Z kirk $
+# $Id: Makefile 139 2004-11-19 21:05:01Z kirk $
 
 MAJOR=	1
-MINOR=	7
+MINOR=	8
 PROGRAMNAME=	jailadmin
 DISTNAME=	${PROGRAMNAME}-${MAJOR}.${MINOR}
-SITEPERLDIR=	/usr/local/lib/perl5/site_perl/5.8.2
+PERLVER=	5.8.5
+SITEPERLDIR=	/usr/local/lib/perl5/site_perl/${PERLVER}
 PREFIX=		/usr/local
 
 all:
@@ -30,6 +31,7 @@ installbase:
 installsnmp:
 	@echo 'Installing the jailadmin SNMP files'
 	install jail-snmp ${PREFIX}/sbin
+	install jail-snmp-persist ${PREFIX}/sbin
 	install JAIL-MIB.txt ${PREFIX}/share/snmp/mibs
 
 deinstall:
@@ -37,6 +39,8 @@ deinstall:
 	rm ${PREFIX}/etc/jailadmin.conf.sample
 	rm ${SITEPERLDIR}/Jail.pm
 	rm ${PREFIX}/sbin/jail-snmp
+	rm ${PREFIX}/sbin/jail-snmp-persist
 	rm ${PREFIX}/sbin/jailadmin
 	rm ${PREFIX}/share/snmp/mibs/JAIL-MIB.txt
 	rm -rf ${PREFIX}/share/doc/${PROGRAMNAME}
+

@@ -1,97 +1,132 @@
 #!/usr/bin/perl -w
 
-# $Id: jail-snmp 138 2004-11-19 21:04:24Z kirk $
+# $Id: jail-snmp 21 2004-02-11 03:06:06Z kirk $
 
 use strict;
 use Jail;
 
 open STDERR, '>/dev/null' or die "Couldn't redirect STDERR: $_";
 
-my ($cmd,
-    $oid) = @ARGV[0,1];
+$| = 1;
 
-my $getnext = $cmd eq '-g' ? 0 : 1;
+my $max;
+my @id;
+my @jail;
 
-$_ = $oid;
-s/^\.//;
+# open LOGFILE, '>>/tmp/snmplog' or die "Unable to write to the log file: $!";
 
-my @id = (split /\./);
-my $max = (scalar @id) - 1;
-my @jail = Jail::getJailList();
-my $retval;
+MAINLOOP:
+while (1)
+{
+    # Wait for a knock then answer it.
+    while ($_ = <>)
+    {
+	# print LOGFILE $_;
+	if ($_ eq "PING\n")
+	{
+	    print "PONG\n";
+	    last;
+	}
+    }
 
-# I love get requests.  Seriously.  I love them.
-if ($cmd eq '-g')
-  {
+    # Get the command, either 'get' or 'getnext'.
+    $_ = <>;
+    exit unless defined $_;
+    chomp;
+    my $command = $_;
+
+    # Get the requested OID.
+    $_ = <>;
+    chomp;
+    my $oid = $_;
+
+    $_ = $oid;
+    s/^\.//;
+
+    @id = (split /\./);
+    $max = (scalar @id) - 1;
+
+    @jail = Jail::getJailList();
+    my $retval;
+
+    # I love get requests.  Seriously.  I love them.
+    if ($command eq 'get')
+    {
+	$retval = topLevel(8);
+	if (defined $$retval{'error'})
+	{
+	    print "NONE\n";
+	}
+	else
+	{
+	    print <<__EORESPONSE__;
+$oid
+$$retval{'type'}
+$$retval{'value'}
+__EORESPONSE__
+	}
+	next MAINLOOP;
+    }
+
+    # I hate getnext requests.  Really.  I hate them.
+    my $count = 0;
+
     $retval = topLevel(8);
     unless (defined $$retval{'error'})
-      {
-	print <<__EORESPONSE__;
-$oid
-$$retval{'type'}
-$$retval{'value'}
-__EORESPONSE__
-      }
+    {
+	$id[-1]++;
+    }
 
-    exit;
-  }
+    while (1 and ++$count < 20)
+    {
+	# $id[-1]++;
+	$retval = topLevel(8);
 
-# I hate getnext requests.  Really.  I hate them.
-my $count = 0;
-
-$retval = topLevel(8);
-unless (defined $$retval{'error'})
-  {
-    $id[-1]++;
-  }
-
-while (1 and ++$count < 20)
-  {
-    # $id[-1]++;
-    $retval = topLevel(8);
-
-    if (defined ($$retval{'error'}))
-      {
-	if ($$retval{'error'} eq 'short')
-	  {
-	    push @id, 1;
-	    $max++;
-	  }
-	elsif ($$retval{'error'} eq 'long')
-	  {
-	    pop @id;
-	    $max--;
-	  }
-	elsif ($$retval{'error'} eq 'max')
-	  {
-	    my $levels = $$retval{'levels'} || 1;
-	    for (my $i = 0; $i < $levels; $i++)
-	      {
+	if (defined ($$retval{'error'}))
+	{
+	    if ($$retval{'error'} eq 'short')
+	    {
+		push @id, 1;
+		$max++;
+	    }
+	    elsif ($$retval{'error'} eq 'long')
+	    {
 		pop @id;
 		$max--;
-	      }
-	    $id[-1]++;
-	    exit if scalar @id < 8;
-	  }
-	elsif ($$retval{'error'} eq 'quit')
-	  {
-	    exit;
-	  }
-      }
-    else
-      {
-	$oid = '.' . (join '.', @id);
-	print <<__EORESPONSE__;
+	    }
+	    elsif ($$retval{'error'} eq 'max')
+	    {
+		my $levels = $$retval{'levels'} || 1;
+		for (my $i = 0; $i < $levels; $i++)
+		{
+		    pop @id;
+		    $max--;
+		}
+		$id[-1]++;
+		if (scalar @id < 8)
+		{
+		    print "NONE\n";
+		    next MAINLOOP;
+		}
+	    }
+	    elsif ($$retval{'error'} eq 'quit')
+	    {
+		print "NONE\n";
+		next MAINLOOP;
+	    }
+	}
+	else
+	{
+	    $oid = '.' . (join '.', @id);
+	    print <<__EORESPONSE__;
 $oid
 $$retval{'type'}
 $$retval{'value'}
 __EORESPONSE__
-	exit;
-      }
-  }
-
-exit;
-
+	    next MAINLOOP;
+	}
+    }
+}
 
 
 sub topLevel
