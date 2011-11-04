@@ -1,0 +1,244 @@
+#!/usr/bin/perl -w
+
+# $Id: jailadmin 66 2004-04-02 19:44:14Z kirk $
+
+# This software was written by Kirk Strauser <kirk@strauser.com>, and may be
+# freely distributed under the terms of the BSD License.
+#
+# Please submit any changes to this program back to the author so that they
+# can be easily distributed to other others who might be interested.
+
+use strict;
+use Jail;
+
+
+############################################################
+#### Variable declaration                               ####
+############################################################
+my $server;
+my $oper;
+my @serverlist = ();
+my @jails = Jail::getJailList();
+
+
+############################################################
+#### Configuration options                              ####
+############################################################
+my %opt =
+    (
+     'psstyle' => 'new'
+    );
+
+
+############################################################
+#### Argument processing                                ####
+############################################################
+
+if (@ARGV < 1)
+{
+    print <<__EOHELP__;
+Usage: $0 operation serverspec
+
+Where serverspec is the name of one a jail environments to act upon, a
+space-seperated list of names, or "all"; and operation is one of:
+
+    list    List the names of all configured jails
+    start   Launch the server
+    stop    Stop all processes in the server (really nasty right now)
+    status  Display a list of active processes in the server
+
+__EOHELP__
+
+    exit -1;
+}
+
+$oper = shift @ARGV;
+@serverlist = Jail::getMatchingJailNames(@ARGV);
+
+############################################################
+#### Main                                               ####
+############################################################
+
+if ($oper eq 'list')
+{
+    print "Configured jails:\n";
+    foreach $server (@jails)
+    {
+	print "    $server\n";
+    }
+    exit;
+}
+
+########################################
+## Get a jail's status
+########################################
+if ($oper eq 'status')
+{
+    foreach $server (sort @serverlist)
+    {
+	print "Server: $server\n";
+
+	unless (Jail::jailHasProcesses($server))
+	{
+	    print "No running processes.\n\n";
+	    next;
+	}
+
+	my %procinfo = Jail::getProcList($server);
+	if ($opt{'psstyle'} eq 'old')
+	{
+	    print "\nPID    username/uid processname and cmdline\n";
+	    print "------ ------------ ------------------------------\n";
+	    foreach my $pid (sort { $a <=> $b } (keys %procinfo))
+	    {
+		printf "%-6d %-12s %s: %s\n",
+		    ($pid,
+		     "$procinfo{$pid}{'user'} ($procinfo{$pid}{'uid'})",
+		     $procinfo{$pid}{'procname'},
+		     $procinfo{$pid}{'cmdline'})
+		}
+	}
+	elsif ($opt{'psstyle'} eq 'new')
+	{
+	    print "\n";
+	    print `ps -u | head -1`;
+	    foreach my $pid (sort { $a <=> $b } (keys %procinfo))
+	    {
+		print `ps -wup $pid | tail -n 1`;
+	    }
+	}
+	print "\n";
+    }
+}
+
+########################################
+## Start a jail
+########################################
+elsif ($oper eq 'start')
+{
+    foreach $server (sort @serverlist)
+    {
+	print "Starting server $server...\n";
+
+	# Check for processes already running in that jailspace
+	if (Jail::jailHasProcesses($server))
+	{
+	    print STDERR "ERROR: That jail already seems to be running\n";
+	    next;
+	}
+
+	Jail::mount($server);
+	Jail::launch($server);
+    }
+}
+
+########################################
+## Stop a jail
+########################################
+elsif ($oper eq 'stop')
+{
+    my @queue = @serverlist;
+    my %state;
+
+    my $initialstate = 1;
+
+    foreach my $i (1 .. Jail::maxparallel())
+    {
+	my $server = shift @queue;
+	last unless $server;
+	$state{$server} = $initialstate;
+    }
+
+    while (keys %state)
+    {
+	my $sleep = 0;
+
+	foreach my $server (sort (keys %state))
+	{
+	    print "--- Server: $server state $state{$server}\n";
+
+	    my $finished = 0;
+
+	    # Send term signal
+	    if ($state{$server} == 1)
+	    {
+		# TERM all of the processes
+		print "Sending signal TERM to all processes in $server\n";
+		Jail::signalProcs($server, 'TERM');
+	    }
+
+	    # Sleep 5 seconds
+	    elsif ($state{$server} == 2)
+	    {
+		Jail::updateProcessList();
+		print "Waiting at least 5 seconds to check success...\n";
+		$sleep = 5 if $sleep < 5;
+	    }
+
+	    # Sleep 10 seconds for slow processes
+	    elsif ($state{$server} == 3)
+	    {
+		Jail::updateProcessList();
+		if (Jail::jailHasProcesses($server))
+		{
+		    print "Some processes are still running.  Sleeping at least 10 seconds...\n";
+		    $sleep = 10 if $sleep < 10;
+		}
+		else
+		{
+		    print "No processess left.\n";
+		    # Skip the next process check - we've already passed.
+		    $state{$server}++;
+		}
+	    }
+
+	    # Send kill signal
+	    elsif ($state{$server} == 4)
+	    {
+		Jail::updateProcessList();
+		if (Jail::jailHasProcesses($server))
+		{
+		    print "Sending remaining processes the KILL signal\n";
+		    Jail::signalProcs($server, 'KILL');
+		}
+		else
+		{
+		    print "No processess left.\n";
+		}
+	    }
+
+	    # Unmount specified filesystems
+	    elsif ($state{$server} == 5)
+	    {
+		print "Unmounting filesystems for $server\n";
+		Jail::umount($server);
+
+		$finished = 1;
+	    }
+
+	    $state{$server}++;
+
+	    if ($finished)
+	    {
+		# Remove this server from the action list
+		delete $state{$server};
+
+		# Add a new server if any are left.
+		my $server = shift @queue;
+		$state{$server} = $initialstate if $server;
+	    }
+	}
+
+	# Now, sleep for a few seconds if any of the servers need it.
+	sleep $sleep if $sleep;
+    }
+}
+
+else
+{
+    print STDERR <<__EOOPTIONS__;
+ERROR: "$oper" is not a valid operation.  The requested operation must be
+one of 'start', 'stop', or 'status'
+__EOOPTIONS__
+    exit -1;
+}

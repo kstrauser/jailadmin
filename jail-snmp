@@ -1,0 +1,176 @@
+#!/usr/bin/perl -w
+
+# $Id: jail-snmp 21 2004-02-11 03:06:06Z kirk $
+
+use strict;
+use Jail;
+
+my ($cmd,
+    $oid) = @ARGV[0,1];
+
+my $getnext = $cmd eq '-g' ? 0 : 1;
+
+$_ = $oid;
+s/^\.//;
+
+my @id = (split /\./);
+my $max = (scalar @id) - 1;
+my @jail = Jail::getJailList();
+my $retval;
+
+# I love get requests.  Seriously.  I love them.
+if ($cmd eq '-g')
+  {
+    $retval = topLevel(8);
+    unless (defined $$retval{'error'})
+      {
+	print <<__EORESPONSE__;
+$oid
+$$retval{'type'}
+$$retval{'value'}
+__EORESPONSE__
+      }
+
+    exit;
+  }
+
+# I hate getnext requests.  Really.  I hate them.
+my $count = 0;
+
+$retval = topLevel(8);
+unless (defined $$retval{'error'})
+  {
+    $id[-1]++;
+  }
+
+while (1 and ++$count < 20)
+  {
+    # $id[-1]++;
+    $retval = topLevel(8);
+
+    if (defined ($$retval{'error'}))
+      {
+	if ($$retval{'error'} eq 'short')
+	  {
+	    push @id, 1;
+	    $max++;
+	  }
+	elsif ($$retval{'error'} eq 'long')
+	  {
+	    pop @id;
+	    $max--;
+	  }
+	elsif ($$retval{'error'} eq 'max')
+	  {
+	    my $levels = $$retval{'levels'} || 1;
+	    for (my $i = 0; $i < $levels; $i++)
+	      {
+		pop @id;
+		$max--;
+	      }
+	    $id[-1]++;
+	    exit if scalar @id < 8;
+	  }
+	elsif ($$retval{'error'} eq 'quit')
+	  {
+	    exit;
+	  }
+      }
+    else
+      {
+	$oid = '.' . (join '.', @id);
+	print <<__EORESPONSE__;
+$oid
+$$retval{'type'}
+$$retval{'value'}
+__EORESPONSE__
+	exit;
+      }
+  }
+
+exit;
+
+
+
+sub topLevel
+  {
+    my $level = shift;
+
+    return {'error'=>'short'} if $level > $max;
+
+    if ($id[$level] == 1)
+      {
+	return general($level + 1);
+      }
+
+    if ($id[$level] == 2)
+      {
+	return jailTable($level + 1);
+      }
+
+    return {'error'=>'quit'};
+}
+
+sub general
+  {
+    my $level = shift;
+    my $key = $id[$level];
+
+    return {'error'=>'short'} if $level > $max;
+
+    # Number of jails
+    if ($key == 1)
+      {
+	return {'type' => 'integer', 'value' => scalar @jail};
+      }
+
+    return {'error'=>'max'};
+  }
+
+sub jailTable
+  {
+    my $level = shift;
+
+    return {'error'=>'short'} if ($level + 1) > $max;
+    return {'error'=>'long'} if ($level + 1) < $max;
+
+    my $key = $id[$level];
+    my $index = $id[$level + 1];
+
+    # Jail too high?
+    return {'error'=>'max'} if $index > scalar @jail;
+
+    my $servername = $jail[$index - 1];
+
+    # Index
+    if ($key == 1)
+      {
+	return {'type'=>'integer', 'value'=>$index};
+      }
+    # Servername
+    elsif ($key == 2)
+      {
+	return {'type'=>'string', 'value'=>$servername};
+      }
+    # Hostname
+    elsif ($key == 3)
+      {
+	my $temp = Jail::getJailInfo($servername);
+	return {'type'=>'string','value'=>$$temp{'hostname'}};
+      }
+    # IP address
+    elsif ($key == 4)
+      {
+	my $temp = Jail::getJailInfo($servername);
+	return {'type'=>'ipaddress','value'=>$$temp{'ip'}};
+      }
+    # Processes
+    elsif ($key == 5)
+      {
+	my %temp = Jail::getProcList($servername);
+	return {'type'=>'string','value'=>scalar (keys %temp) . ".0"};
+      }
+
+    # Back out at least two levels to get out of this table
+    return {'error'=>'max', 'levels'=>2};
+  }

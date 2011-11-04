@@ -1,0 +1,99 @@
+UCD-DEMO-MIB DEFINITIONS ::= BEGIN
+
+-- $Id: JAIL-MIB.txt 21 2004-02-11 03:06:06Z kirk $
+
+IMPORTS
+    MODULE-IDENTITY, OBJECT-TYPE, Integer32	FROM SNMPv2-SMI
+    ucdavis					FROM UCD-SNMP-MIB;
+
+jail MODULE-IDENTITY
+    LAST-UPDATED "200205180000Z"
+    ORGANIZATION "The Strauser Group"
+    CONTACT-INFO
+	"This mib is maintained by Kirk Strauser as part of the
+	 FreeBSD jail administration project.
+
+	 email:    kirk@strauser.com"
+    DESCRIPTION
+	"FreeBSD jail administration MIB."
+    REVISION	 "200205180000Z"
+    DESCRIPTION
+	"Based heavily on UCD's UCD-DEMO-MIB."
+    ::= { ucdavis 255 }
+
+general		OBJECT IDENTIFIER ::= { jail 1 }
+
+numJails OBJECT-TYPE
+    SYNTAX	Integer32 (0..2147483647)
+    MAX-ACCESS	read-only
+    STATUS	current
+    DESCRIPTION
+	"A set of value 1 to this object resets the
+	 demonstration user's auth and priv keys to the
+	 keys based on the P->Ku->Kul transformation of the
+	 value of the ucdDemoPasspharse object.
+
+	 Values other than 1 are ignored."
+    ::= { general 1 }
+
+jailTable OBJECT-TYPE
+    SYNTAX      SEQUENCE OF JailEntry
+    MAX-ACCESS  not-accessible
+    STATUS      current
+    DESCRIPTION
+        "A table containing information on running
+         programs/daemons configured for monitoring in the
+         snmpd.conf file of the agent.  Processes violating the
+         number of running processes required by the agent's
+         configuration file are flagged with numerical and
+         textual errors."
+    ::= { jail 2 }
+
+JailEntry ::= SEQUENCE {
+    jailIndex		Integer32,
+    jailHostname	DisplayString,
+    jailIp		Integer32,
+    jailNumProcs	Integer32
+}
+
+jailIndex OBJECT-TYPE
+    SYNTAX      Integer32 (0..65535)
+    MAX-ACCESS  read-only
+    STATUS      current
+    DESCRIPTION
+        "Reference Index for each managed jail."
+    ::= { jailTable 1 }
+
+jailServer OBJECT-TYPE
+    SYNTAX      DisplayString
+    MAX-ACCESS  read-only
+    STATUS      current
+    DESCRIPTION
+        "The jail's servername."
+    ::= { jailTable 2 }
+
+jailHostname OBJECT-TYPE
+    SYNTAX      DisplayString
+    MAX-ACCESS  read-only
+    STATUS      current
+    DESCRIPTION
+        "The hostname of the jail."
+    ::= { jailTable 3 }
+
+jailIp OBJECT-TYPE
+    SYNTAX      Integer
+    MAX-ACCESS  read-only
+    STATUS      current
+    DESCRIPTION
+        "The ip address of the jail."
+    ::= { jailTable 4 }
+
+jailNumProcs OBJECT-TYPE
+    SYNTAX      Integer32 (0..65535)
+    MAX-ACCESS  read-only
+    STATUS      current
+    DESCRIPTION
+        "The number of processes currently loaded."
+    ::= { jailTable 5 }
+
+END

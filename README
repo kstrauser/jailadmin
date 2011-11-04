@@ -1,0 +1,175 @@
+# $Id: README 67 2004-04-02 20:41:35Z kirk $
+
+#### INTRODUCTION
+
+JailAdmin is a simple system for administering FreeBSD jail environments.
+It consists of four files:
+
+  Jail.pm - A general-purpose module for gathering information, starting,
+            and stopping jails
+
+  jailadmin - A Perl program that serves as a command line interface to
+              Jail.pm
+
+  jailadmin.conf - Site-specific configuration options
+
+  jail.sh - An rc.d file to start and stop jails at system boot or shutdown.
+
+The optional SNMP components are:
+
+  jail-snmp - A plugin to the net-snmp package
+
+  JAIL-MIB.txt - A MIB file describing the SNMP attributes
+
+#### TERMINOLOGY
+
+   Server:
+      A named set of attributes uniquely describing a jail environment.
+      This extra layer of abstraction provides a consistent anchor for jails
+      whose hostnames and IPs may change.
+
+
+#### CONFIGURATION
+
+Edit jailadmin.conf with your favorite editor.  It has an extremely simple
+format:
+
+   - All global options are defined as 'key = value'
+
+   - All server-specific options are defined by the appropriate servername
+     on a line by itself, followed by one or more lines beginning with a
+     space, in the format 'key: value'
+
+   - Leading and trailing whitespace are ignored, except for the leading
+     whitespace that distinguishes server-specific options (as above)
+
+   - All characters on a line after a pound sign '#' are ignored
+
+   - Blank lines are ignored
+
+The sample configuration file is heavily documented, and all available
+options are defined there.
+
+Example:
+
+Say that you have 4 servers (named 'server1', 'server2', 'server3',
+'server4').  They are all rooted in subdirectories of /var/jail .  They are
+all webservers to different domains.  jailadmin.conf could be written as:
+
+########################################
+jaildir=/var/jail
+
+server1
+    ip: 10.0.1.2
+    hostname: www.domain1.com
+
+server2
+    ip: 10.0.1.3
+    hostname: www.domain2.com
+
+server3
+    ip: 10.0.1.4
+    hostname: www.domain3.com
+
+server4
+    ip: 10.0.1.5
+    hostname: www.domain4.com
+########################################
+
+
+#### USAGE
+
+jailadmin takes at least two arguments, 'operation' and one or more
+servernames, where servernames are the name of entries or groups defined in
+jailadmin.conf, and operation is one of 'start', 'stop', and 'status'.
+
+'start' is pretty simple, but it does check to back sure that the specified
+jail is not currently running (defined as having one or more processes
+imprisoned within it.
+
+'stop' is not very graceful at this time.  It sends a TERM signal to all
+processes within the jail.  After a 5-second wait, if processes are still
+running, then it waits another 10 seconds.  All processes still running at
+that time are sent the KILL signal.  This is similar to FreeBSD's own
+shutdown process, although vastly less sophisticated.
+
+Recent versions of jailadmin can parallelize stages of the shutdown process
+for several jails at once, so that the waiting periods can be made as
+concurrent as possible.  For example, given 10 jails where each needs to
+wait for the full 15 seconds, the total shutdown time can be reduced from
+150 seconds to 15.  This is very nice for quickly rebooting a numbe of
+servers.
+
+'status' returns a ps(1)-like status report.  For example:  
+
+PID    username/uid processname and cmdline
+------ ------------ ------------------------------
+20307  root (0)     inetd: /usr/sbin/inetd -wW
+20309  root (0)     cron: /usr/sbin/cron
+20311  root (0)     sshd: /usr/sbin/sshd
+20314  root (0)     sendmail: sendmail: Queue runner@00:30:00 for /var/spool/mqueue
+20317  smmsp (25)   sendmail: sendmail: Queue runner@00:30:00 for /var/spool/clientmqueue
+
+
+#### NOTES
+
+Jail.pm expects its configuration file to be /usr/local/etc/jailadmin.conf
+by default.  However, upon initialization, it calls Getopt::Long::GetOptions
+to look for a command line argument '--conffile' to read instead.
+Therefore, all programs that use Jail.pm (such as jailadmin), can use any
+other configuration file.  Example:
+
+  jailadmin --conffile /tmp/generatedfile server2 start
+
+Jail.pm aggressively caches all information it acquires from its
+environment; you may call any of its functions as often as you like with
+little performance degradation.  However, this also means that its
+information may be out-of-date, particularly its cache of running processes
+and their information.  Call Jail::updateProcessList to force the module to
+reload this information as needed.  For example, after calling
+Jail::signalProcs(), you would probably want to see if any processes are
+still running in a particular jail.  updateProcessList() will ensure that
+you're examining current data.
+
+
+#### SNMP
+
+As of version 1.3, the jailadmin package comes with an SNMP extension for
+the UCD-SNMP snmpd.  By adding the extension and the included mib
+definitions to your snmpd configuration, you can easily monitor your jail
+environments with the same tools you're already using to track your network
+usage, hardware capacity, and other interesting data.
+
+An example tree traversal:
+
+  # snmpwalk localhost mycommunity .1.3.6.1.4.1.2021.255
+  enterprises.ucdavis.jail.general.numJails = 3
+  enterprises.ucdavis.jail.jailTable.jailIndex.1 = 1
+  enterprises.ucdavis.jail.jailTable.jailIndex.2 = 2
+  enterprises.ucdavis.jail.jailTable.jailIndex.3 = 3
+  enterprises.ucdavis.jail.jailTable.jailServer.1 = "vserver1"
+  enterprises.ucdavis.jail.jailTable.jailServer.2 = "vserver2"
+  enterprises.ucdavis.jail.jailTable.jailServer.3 = "vserver3"
+  enterprises.ucdavis.jail.jailTable.jailHostname.1 = "server1.int"
+  enterprises.ucdavis.jail.jailTable.jailHostname.2 = "server2.int"
+  enterprises.ucdavis.jail.jailTable.jailHostname.3 = "server3.int"
+  enterprises.ucdavis.jail.jailTable.jailIp.1 = IpAddress: 10.0.5.1
+  enterprises.ucdavis.jail.jailTable.jailIp.2 = IpAddress: 10.0.5.2
+  enterprises.ucdavis.jail.jailTable.jailIp.3 = IpAddress: 10.0.5.3
+  enterprises.ucdavis.jail.jailTable.jailNumProcs.1 = 6
+  enterprises.ucdavis.jail.jailTable.jailNumProcs.2 = 23
+  enterprises.ucdavis.jail.jailTable.jailNumProcs.3 = 14
+
+Future support for read-write settings is being considered.  Imagine being
+able to start or stop a jail by writing to jailTable.isRunning.n without
+leaving your OpenView or Netcool console.
+
+
+#### CREDITS
+
+This package was developed by Kirk Strauser <kirk@struaser.com> with the
+help and guidance of generous contributors.  In no particular order, they
+include:
+
+  - Dar Larsson
+  - Jeremy Bobbio
