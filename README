@@ -1,4 +1,13 @@
-# $Id: README 138 2004-11-19 21:04:24Z kirk $
+#### READ THIS FIRST
+
+I wrote this code in 2004 before anyone had solid ideas about the "right"
+way to manage FreeBSD jails. Since then, /etc/rc.d/jail has become part of
+the base system and ezjail has taken over most of the day-to-day maintenance
+chores. Still, some people are still downloading this software, probably for
+the SNMP bits or because they're used to it and don't want to change.
+If that's you, here you go! Moving the project to GitHub should make it
+easier for you to find and any patches you happen to make would be most
+welcome!
 
 #### INTRODUCTION
 
